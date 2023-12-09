@@ -2,31 +2,67 @@ import { FastifyInstance } from 'fastify'
 import { knex } from '../database'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
+import { checkSessionIdExists } from '../middlewares/check-session-id-exists'
 
 export async function transactionsRoutes(app: FastifyInstance) {
-  app.get('/', async () => {
-    const transactions = await knex('transactions').select()
+  app.get(
+    '/',
+    {
+      preHandler: [checkSessionIdExists],
+    },
+    async (request) => {
+      const { sessionId } = request.cookies
+      const transactions = await knex('transactions')
+        .where('session_id', sessionId)
+        .select()
 
-    return { transactions }
-  })
+      return { transactions }
+    },
+  )
 
-  app.get('/summary', async () => {
-    const summary = await knex('transactions')
-      .sum('amount', { as: 'amount' })
-      .first()
+  app.get(
+    '/summary',
+    {
+      preHandler: [checkSessionIdExists],
+    },
+    async (request) => {
+      const { sessionId } = request.cookies
+      const summary = await knex('transactions')
+        .where('session_id', sessionId)
+        .sum('amount', { as: 'amount' })
+        .first()
 
-    return { summary }
-  })
+      return { summary }
+    },
+  )
 
-  app.get('/:id', async (request) => {
-    const getTransactionSchema = z.object({
-      id: z.string().uuid(),
-    })
+  app.get(
+    '/:id',
+    {
+      preHandler: [checkSessionIdExists],
+    },
+    async (request, reply) => {
+      const getTransactionSchema = z.object({
+        id: z.string().uuid(),
+      })
 
-    const { id } = getTransactionSchema.parse(request.params)
-    const transaction = await knex('transactions').where('id', id).first()
-    return { transaction }
-  })
+      const { id } = getTransactionSchema.parse(request.params)
+      const { sessionId } = request.cookies
+      const transaction = await knex('transactions')
+        .where({
+          id,
+          session_id: sessionId,
+        })
+        .first()
+
+      if (!transaction) {
+        return reply.status(401).send({
+          error: 'Unauthorized',
+        })
+      }
+      return { transaction }
+    },
+  )
 
   app.post('/', async (request, reply) => {
     const createTransactionSchema = z.object({
